@@ -35,5 +35,8 @@ The script requires the following packages:
 
 For more details on Land Use data, see [geodata documentation](https://github.com/rspatial/geodata).
 
+## Citation
+Please make a reference to this github page when using this tool in publications.
+
 ## License
 This project is licensed under the MIT License. Contributions and improvements are welcome!
