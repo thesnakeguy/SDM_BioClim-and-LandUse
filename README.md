@@ -1,7 +1,7 @@
 # Maxent SDM using BioClim and Land Use Data
 
 ## Overview
-This RMarkdown script provides a framework for Species Distribution Modeling (SDM) and ecological niche analysis under present and future climate scenarios. Using MaxEnt, it models species distributions based on both **BioClim** and **Land Use** data.
+This RMarkdown script provides a framework for Species Distribution Modeling (SDM) and ecological niche analysis under present and future climate scenarios. Using MaxEnt, it models species distributions based on both **BioClim** and **Land Use** data applying 10-fold cross-validation.
 It also enables future projections based on CMIP6 climate models and SSP (Shared Socioeconomic Pathway) scenarios.
 
 ## Features
@@ -29,7 +29,7 @@ Clone this repository and run the script in an R environment. To specify paramet
 The script requires the following packages:
 - `dismo`, `raster`, `rgbif`, `sf`, `rmaxent`, `rJava`, `rasterVis`, `viridis`, `geodata`, `ggplot2`, `stringr`, `rnaturalearth`, `caret`
 
-### BioClim and Land Use Variables
+### CMIP6 BioClim and Land Use Variables
 - **BioClim**: 19 variables including temperature and precipitation measures.
 - **Land Use**: Variables representing vegetation, built environments, water bodies, population density, human footprint, and elevation.
 
