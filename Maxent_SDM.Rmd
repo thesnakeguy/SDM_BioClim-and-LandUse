@@ -235,7 +235,7 @@ This plot shows the georeferenced species records that will be used to train the
 all_countries <- rnaturalearth::ne_countries(scale = "medium", returnclass = "sf")
 ggplot() + geom_point(data = points, aes(x=decimalLongitude, y = decimalLatitude), col="red") +
   geom_sf(data = all_countries, fill = "transparent", color="black") +
-  coord_sf(xlim = c(bbox$xmin, bbox$xmax), ylim = c(bbox$ymin, bbox$ymax), expand = F) + theme_bw()
+  coord_sf(xlim = c(bbox$xmin, bbox$xmax), ylim = c(bbox$ymin, bbox$ymax), expand = TRUE) + theme_bw()
 ```
 
 
@@ -402,7 +402,7 @@ plot_response_curves <- function(model) {
   
   # Loop through predictors and plot response curves with titles
   for (var in names(model@presence)) {
-    dismo::response(model, var = var, range = 'pa', col = "grey", lwd = 4, expand = 0)
+    dismo::response(model, var = var, range = 'p', col = "grey", lwd = 4, expand = 0)
     # title(main = var)
   }
   # Reset plotting layout back to default
