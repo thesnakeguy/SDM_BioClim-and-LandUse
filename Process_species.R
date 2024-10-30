@@ -1,23 +1,29 @@
 # Load necessary libraries
 library(rmarkdown)
 
-# Define the working directory for outputs
+#### Define the working directory for outputs #####################
 workdir <- "C:/Documents and Settings/pdeschepper/Desktop/Maxent"
 output_dir <- file.path(workdir, "html")
+species_list <- file.path("D:/temp/SDM_Herpetofauna/Snakes/SpeciesList.txt")
+###################################################################
+
+
+
 
 # Create the output directory if it doesn’t exist
 if (!dir.exists(output_dir)) dir.create(output_dir, recursive = TRUE)
 
 # Read the species list from the text file
-species_list <- readLines("SpeciesList.txt")
+sp_list <- readLines(species_list)
 
-# Base parameters that stay constant across reports
+# Base parameters that stay constant across reports and override defaults
 base_params <- list(
   Workdir = workdir,
   Country = "",
   Continent = "europe",
   Database = "all",
   Limit = 5000,
+  ExportRaster = "YES",
   Climate.model = "EC-Earth3-Veg",
   SSP = "245",
   Plot.xmin = -11,
@@ -27,7 +33,8 @@ base_params <- list(
 )
 
 # Loop through each species and render an HTML report
-for (species in species_list) {
+for (species in sp_list) {
+  print(paste("Processing species:", species))
   # Update species-specific parameter
   params <- base_params
   params$Species <- species  # Set the species for this iteration
