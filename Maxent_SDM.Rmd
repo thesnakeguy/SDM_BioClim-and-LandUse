@@ -21,7 +21,7 @@ params:
     choices: [all, africa, antarctica, asia, europe, north_america, south_america, oceania]
   Database:
     label: "Database:"
-    value: inaturalist
+    value: gbif
     input: select
     choices: [gbif, inaturalist, observation]
   Limit:
@@ -32,6 +32,15 @@ params:
     label: "Select your working directory:"
     value: "C:/Documents and Settings/pdeschepper/Desktop/Maxent"
     input: text
+  Ncores:
+    label: "Number of computing cores:"
+    value: 10
+    input: numeric
+  Range:
+    label: "Apply an overlay of the species' range to the predictions:"
+    value: "YES"
+    input: select
+    choices: ["YES","NO"]
   ExportRaster:
     label: "Export raster objects for predictions:"
     value: "NO"
@@ -110,6 +119,8 @@ library(caret)
 library(dichromat)
 library(dplyr)
 library(kableExtra)
+library(rangeBuilder)
+library(ENMeval)
 ```
 
 ```{r Get species records, include=FALSE, echo=FALSE}
@@ -120,11 +131,12 @@ ContinentParam <- NULL
 if (params$Continent == "all") {
   ContinentParam <- ""} else {ContinentParam <- params$Continent}
 
-occurrences <- rgbif::occ_data(scientificName = params$Species,
+taxonKey <- name_backbone(params$Species)$usageKey
+occurrences <- rgbif::occ_data(taxonKey = taxonKey,
                               limit = params$Limit,
                               hasCoordinate = TRUE,
                               hasGeospatialIssue = FALSE,
-                              coordinateUncertaintyInMeters = '0,250',
+                              coordinateUncertaintyInMeters = '0,500',
                               country = params$Country,
                               continent = ContinentParam)
 if (params$Database == "inaturalist") {
@@ -143,8 +155,8 @@ if (params$Database == "inaturalist") {
     print(paste("Using",recs,"gbif records"))
   }
   
-if (recs < 50) {
-  stop("Fewer than 50 species records: Process aborted.")
+if (recs < 100) {
+  stop("Fewer than 100 species records: Process aborted.")
 }
 
 # Create a SpatialPointsDataFrame object for the occurrence data
@@ -152,6 +164,24 @@ spdf <- SpatialPointsDataFrame(coords = occurrences[, c("decimalLongitude", "dec
 # Bounding box of distribution
 bbox <- st_bbox(spdf) 
 points <- data.frame(occurrences[, c("decimalLongitude", "decimalLatitude")])
+
+```
+
+```{r Estimating a species range map, include=FALSE, echo=FALSE, message=FALSE}
+
+# Create range map
+if (params$Range == "YES"){
+  # Get alphahull for the species range
+  range_polygon <- getDynamicAlphaHull(occurrences[,1:2], buff = 20000)
+  range_polygon <- range_polygon[[1]]
+  # Convert sf polygon to SpatVector
+  range_spatvector <- terra::vect(range_polygon)
+  # Step 1: Create an empty raster spanning the extent of the polygon
+  raster_template <- rast(terra::ext(range_spatvector), resolution = 0.01, crs = "EPSG:4326")
+  # Step 2: Rasterize the polygon
+  range <- rasterize(range_spatvector, raster_template, field = 1)
+}
+
 ```
 
 ```{r (Down)Load BioClim and Land Use data, include=TRUE, echo=FALSE}
@@ -159,7 +189,7 @@ points <- data.frame(occurrences[, c("decimalLongitude", "decimalLatitude")])
 #### Load BioClimatic data ####
 # Create an extent object for the study area using bounding box coordinates
 # By adding 2, we add 1 degree at each side
-study_area_ext <- extent(bbox)*1.25
+study_area_ext <- extent(bbox)
 # Create a raster object for the study area
 study_area_ras <- raster::raster(study_area_ext)
 # Set the resolution of the raster
@@ -189,6 +219,7 @@ fut <- as(fut, "Raster")
 fut2 <- as(fut2, "Raster")
 names(fut) <- str_replace(names(fut), "bio0?(\\d+)", "bio_\\1")
 names(fut2) <- str_replace(names(fut2), "bio0?(\\d+)", "bio_\\1")
+
 ```
 
 ```{r Load Land Use data , include=FALSE}
@@ -246,18 +277,31 @@ landuse_rasterbrick <- do.call(stack, landuse)
 
 ## Species records
 This plot shows the georeferenced species records that will be used to train the Species Distribution Models (SDM) using MaxEnt. It is good to maximize the number of records.
+When the option of the species' range map is toggled, a range map is plotted by an alpha hull polygon.
 
-**`r recs` records** of `r params$Species` are used for processing (georeference obscurity < 250m).
+**`r recs` records** of `r params$Species` are used for processing (georeference obscurity < 500m).
 
-```{r Records plot, include=TRUE, echo=FALSE}
+```{r Records plot, include=TRUE, echo=FALSE, dev='png'}
+
 all_countries <- rnaturalearth::ne_countries(scale = "medium", returnclass = "sf")
-ggplot() + geom_point(data = points, aes(x=decimalLongitude, y = decimalLatitude), col="red") +
+gg <- ggplot() + geom_point(data = points, aes(x=decimalLongitude, y = decimalLatitude), col="blue", size = 0.7) +
   geom_sf(data = all_countries, fill = "transparent", color="black") +
-  coord_sf(xlim = c(bbox$xmin, bbox$xmax), ylim = c(bbox$ymin, bbox$ymax), expand = TRUE) + theme_bw()
+  coord_sf(xlim = c(bbox$xmin-2, bbox$xmax+2), ylim = c(bbox$ymin-2, bbox$ymax+2), expand = TRUE) + theme_bw()
+
+if (params$Range == "YES") {
+  range_df <- as.data.frame(range, xy = TRUE, na.rm = TRUE)
+  gg <- ggplot() + geom_point(data = points, aes(x=decimalLongitude, y = decimalLatitude), col="blue", size = 0.7) +
+    geom_sf(data = all_countries, fill = "transparent", color="black") +
+    coord_sf(xlim = c(bbox$xmin-2, bbox$xmax+2), ylim = c(bbox$ymin-2, bbox$ymax+2), expand = TRUE) + 
+    geom_tile(data = range_df, aes(x = x, y = y), fill = "limegreen", alpha = 0.5) + theme_bw() 
+} 
+plot(gg)
+
 ```
 
 
-```{r Combine BoiClim and Land use data into predictors, include=FALSE}
+```{r Combine BioClim and Land use data into predictors, include=FALSE}
+
 ### Make predictors dataset ####
 # aggregate bioclimatic and land use date in one dataset
 # align the extents
@@ -269,9 +313,11 @@ if(!all(res(worldclim_data_aligned) == res(landuse_rasterbrick))) {
 predictors <- stack(c(worldclim_data_aligned, landuse_rasterbrick))
 fut_predictors <- stack(c(crop(fut, extent(landuse_rasterbrick)), landuse_rasterbrick))
 fut2_predictors <- stack(c(crop(fut2, extent(landuse_rasterbrick)), landuse_rasterbrick))
+
 ```
 
 ```{r Clean the Full, BioClim and Land Use dataset by removing correlation, include=FALSE}
+
 # Clean dataset for correlation > 0.75
 datasets <- list(predictors = predictors, 
                  worldclim_data_aligned = worldclim_data_aligned, 
@@ -306,18 +352,113 @@ fut2_predictors_cleaned <- fut2_predictors[[names(predictors_cleaned)]]
 ```
 
 
-```{r Run the maxent models, include=FALSE, echo=FALSE}
-#### create test and train data ####
+```{r Run the maxent models after tuning with ENMevaluate, include=FALSE, echo=FALSE}
+#######################
+
+# Tuning with ENMeval
+
+#######################
+
+
+occs <- data.frame(spdf$decimalLongitude, spdf$decimalLatitude)
+# List of environmental datasets
+env_datasets <- list(
+  predictors = predictors_cleaned,
+  worldclim = worldclim_data_aligned_cleaned,
+  landuse = landuse_rasterbrick_cleaned
+)
+
+# Initialize lists to store evaluation results and best models
+eval_results <- list()
+best_models <- list()
+best_params <- list()
+
+# Loop through each environmental dataset
+for (env_name in names(env_datasets)) {
+  # Evaluate the model
+  eval_results[[env_name]] <- ENMevaluate(
+    occ = occs,
+    env = env_datasets[[env_name]], 
+    partitions = "block", 
+    parallel = TRUE, 
+    algorithm = "maxnet",
+    numCores = params$Ncores, 
+    tune.args = list(fc = c("L", "Q", "LQ"), rm = seq(0.5, 2, 0.5))
+  )
+  
+  # Get the best model index based on AICc
+  bestmod <- which(eval_results[[env_name]]@results$AICc == min(eval_results[[env_name]]@results$AICc))
+  
+  # Store the best model and parameters
+  best_models[[env_name]] <- eval_results[[env_name]]@models[[bestmod]]
+  best_params[[env_name]] <- eval_results[[env_name]]@results[bestmod, ]
+}
+
+
+# Store results
+params_predictors <- best_params[["predictors"]]
+params_worldclim <- best_params[["worldclim"]]
+params_landuse <- best_params[["landuse"]]
+
+opt_params <- list(
+  predictors = list(fc = params_predictors$fc, rm = params_predictors$rm),
+  worldclim = list(fc = params_worldclim$fc, rm = params_worldclim$rm),
+  landuse = list(fc = params_landuse$fc, rm = params_landuse$rm)
+)
+
+##################################################
+
+# Run dismo::maxent with tuned parameters
+
+#################################################
+
+
+#create test and train data #
 # Now let us divide this file into 5 parts. 75% of the data will be used to train the model (to create the mode), and 25% will be used to test if it is a good model.
 group <- kfold(points,5)
 pres_train <- points[group!=1,]
 pres_test <- points[group==1,]
 
-#### modeling predictor contribution with maxent and create pseudo-absences ####
-# cross-validation (default) with 10 replicates
-model_full <- maxent(predictors_cleaned, pres_train, removeDuplicates = TRUE, replicates = 10)
-model_bioclim <- maxent(worldclim_data_aligned_cleaned, pres_train, removeDuplicates = TRUE, replicates = 10)
-model_landuse <- maxent(landuse_rasterbrick_cleaned, pres_train, removeDuplicates = TRUE, replicates = 10)
+# Function to create maxent arguments based on optimized feature classes and regularization
+fc_to_args <- function(fc, rm) {
+  args <- c("linear=false", "quadratic=false", "product=false", "threshold=false", "hinge=false")
+  
+  if (grepl("L", fc)) args[1] <- "linear=true"
+  if (grepl("Q", fc)) args[2] <- "quadratic=true"
+  # Add other feature classes if needed, e.g., "P" for product, "T" for threshold, "H" for hinge
+  
+  # Add regularization parameter
+  args <- c(args, paste0("beta_lqp=", rm))
+  
+  return(args)
+}
+
+# Applying this for each model setup using dismo::maxent with optimal parameters
+model_full <- maxent(
+  predictors_cleaned,
+  pres_train,
+  removeDuplicates = TRUE,
+  replicates = 10,
+  args = fc_to_args(opt_params$predictors$fc, opt_params$predictors$rm)
+)
+
+model_bioclim <- maxent(
+  worldclim_data_aligned_cleaned,
+  pres_train,
+  removeDuplicates = TRUE,
+  replicates = 10,
+  args = fc_to_args(opt_params$worldclim$fc, opt_params$worldclim$rm)
+)
+
+model_landuse <- maxent(
+  landuse_rasterbrick_cleaned,
+  pres_train,
+  removeDuplicates = TRUE,
+  replicates = 10,
+  args = fc_to_args(opt_params$landuse$fc, opt_params$landuse$rm)
+)
+
+################################################################################################################
 
 # create pseudo-absences to evaluate the model using AUC
 predictorset <- c(predictors_cleaned, worldclim_data_aligned_cleaned, landuse_rasterbrick_cleaned)
@@ -348,6 +489,7 @@ for (i in c(1:length(models))) {
          subtitle = paste("AUC =",AUC)) +
     theme_minimal()
 }
+
 ```
 
 # MaxEnt SDM: the models {.tabset}
@@ -357,7 +499,8 @@ for (i in c(1:length(models))) {
  - *BioClim model*: This model exclusively uses the BioClim variables to train the model.
  - *Land Use model*: This model exclusively uses the land use variables to train the model.<br>
  
- All models are employed with 10-fold cross validation.
+ All models are employed with 10-fold cross validation. The ENMevaluate function from the ENMeval package was used to tune parameters: tune.args = list(fc = c("L", "Q", "LQ"), rm = seq(0.5, 2, 0.5)). <br>
+ 
  
 **BioClimatic variables**<br>
 BIO1 = Annual Mean Temperature<br>
@@ -397,12 +540,14 @@ Following variables are also included:<br>
 
 more info on: https://github.com/rspatial/geodata
 
-```{r Plotting predictor contributions, include=TRUE, echo=FALSE}
+```{r Plotting predictor contributions, include=TRUE, echo=FALSE, dev='png'}
+
 par(mfrow = c(3, 1), mar = c(2, 10, 1.5, 1))
 terra::plot(model_full, main = "Full model") 
 terra::plot(model_bioclim, main = "BioClim model")
 terra::plot(model_landuse, main = "Land Use model")
 par(mfrow = c(1,1))
+
 ```
 
 Predictors within every model have been purged for correlation if r > 0.75. When pairwise correlation is detected above this threshold, one of the variables within the pair is omitted before further processing.
@@ -414,7 +559,8 @@ For each predictor the fitted species-environment relationship is plotted along 
 
 #### Full model
 
-```{r Plotting predictor response curve: full model, include=TRUE, echo=FALSE}
+```{r Plotting predictor response curve: full model, include=TRUE, echo=FALSE, dev='png'}
+
 # Function to plot response curves for a given model
 plot_response_curves <- function(model) {
   # Set up the plotting layout
@@ -429,46 +575,50 @@ plot_response_curves <- function(model) {
   par(mfrow = c(1, 1))
 }
 plot_response_curves(model_full)
+
 ```
 
 #### BioClim model
 
-```{r Plotting predictor response curve: BioClim model, include=TRUE, echo=FALSE}
+```{r Plotting predictor response curve: BioClim model, include=TRUE, echo=FALSE, dev='png'}
 plot_response_curves(model_bioclim)
 ```
 
 #### Land Use model
 
-```{r Plotting predictor response curve: Land Use model, include=TRUE, echo=FALSE}
+```{r Plotting predictor response curve: Land Use model, include=TRUE, echo=FALSE, dev='png'}
 plot_response_curves(model_landuse)
 ```
 
 
 ## Model validation
 
-In order to validate the models, 75% of the data is kept to train the MaxEnt (Maximum Entropy) models, while the remaining 25% is kept aside for model validation.
-The ROC curve is drawn by calculating the true positive rate (TPR) and false positive rate (FPR) at every possible threshold, then graphing TPR over FPR. A perfect model has a TPR of 1.0 and a FPR of 0.0. The larger the Area Under the Curve (AUC), the better a model performs.
+In order to validate the models and make a comparison between the three models trained on different predictor sets, 75% of the data is kept to train the MaxEnt (Maximum Entropy) models, while the remaining 25% is kept aside for model validation.
+The ROC curve is drawn by calculating the true positive rate (TPR) and false positive rate (FPR) at every possible threshold. A perfect model has a TPR of 1.0 and a FPR of 0.0. The larger the Area Under the Curve (AUC), the better a model performs.
 
-```{r Plotting model accuracy, include=TRUE, echo=FALSE}
+```{r Plotting model accuracy, include=TRUE, echo=FALSE, dev='png'}
 cowplot::plot_grid(plotlist = evalplots, ncol = 3)
 ```
 
 Metrics for model evaluation:
 
 ```{r Print model evaluation metrics, include=TRUE, echo=FALSE}
+
 names(e.metrics) <- c("Full model","BioClim model","Land use model")
 print(e.metrics[1:length(models)])
+
 ```
 
 
 ```{r Maxent predictions, include=FALSE, echo=FALSE}
+
 #### Create a map of the predicted distributions in the present and future ####
 # Extent of predictions
 bbox.plot <- c(as.numeric(params$Plot.xmin), as.numeric(params$Plot.xmax), 
                 as.numeric(params$Plot.ymin), as.numeric(params$Plot.ymax))
 ext.pred <- ""
 if (length(bbox.plot) != 4 || any(is.na(bbox.plot))) {
-  ext.pred <- study_area_ext
+  ext.pred <- study_area_ext + 2
 } else {
   ext.pred <- raster::extent(bbox.plot)
 }
@@ -493,8 +643,27 @@ fut2_full_pred <- predict(fut2_predictors_cleaned, model_full, ext = ext.pred, p
 
 ### SDM using BioClim and land use data
 
+```{r cropping and resampling the species range map to map the predictions raster, include=TRUE, echo=FALSE}
 
-```{r, plotting the present 1/3, include=TRUE, echo=FALSE}
+# crop to extent and resample the range map
+if (params$Range == "YES") {
+range_raster <- raster::raster(range)
+range_raster_resampled <- resample(range_raster, present_full, method = "ngb")
+
+present_full <- raster::mask(present_full, range_raster_resampled)
+present_bioclim <- raster::mask(present_bioclim, range_raster_resampled)
+present_landuse <- raster::mask(present_landuse, range_raster_resampled)
+
+fut_full_pred <- raster::mask(fut_full_pred, range_raster_resampled)
+fut2_full_pred <- raster::mask(fut2_full_pred, range_raster_resampled)
+fut_bioclim_pred <- raster::mask(fut_bioclim_pred, range_raster_resampled)
+fut2_bioclim_pred <- raster::mask(fut2_bioclim_pred, range_raster_resampled)
+}
+
+```
+
+
+```{r plotting the present 1/3, include=TRUE, echo=FALSE, dev='png'}
 # Get elevation data (this code here is to add a elevation layer as the bottom layer if wanted)
 # slope <- terra::terrain(elevation_rc, "slope", unit="radians")
 # aspect <- terra::terrain(elevation_rc, "aspect", unit="radians")
@@ -504,42 +673,42 @@ fut2_full_pred <- predict(fut2_predictors_cleaned, model_full, ext = ext.pred, p
 # plot(hill, col=grey(0:100/100), legend=FALSE, mar=c(2,2,1,4),
 #      xlim = c(ext.pred@xmin, ext.pred@xmax),
 #      ylim = c(ext.pred@ymin, ext.pred@ymax))
-raster::plot(present_full, col = terrain.colors(25, alpha = 0.3, rev = TRUE))
+raster::plot(present_full, col = terrain.colors(25, alpha = 1, rev = TRUE))
 title(bquote('MaxEnt full model ' * italic(.(params$Species))))
 # shapefile of countries
 plot(all_countries, add = TRUE, col = "transparent", border = "black")
 # add occurrences with correct projection
-plot(spdf, add = TRUE, pch = 16, cex = 0.5, col = rgb(red = 0, green = 0, blue = 1, alpha = 0.4))
+plot(spdf, add = TRUE, pch = 16, cex = 0.5, col = rgb(red = 0, green = 0, blue = 1, alpha = 0.3))
 ```
 
 ### SDM using BioClim data only
 
 
-```{r, plotting the present 2/3, include=TRUE, echo=FALSE}
+```{r plotting the present 2/3, include=TRUE, echo=FALSE, dev='png'}
 # plot(hill, col=grey(0:100/100), legend=FALSE, mar=c(2,2,1,4),
 #      xlim = c(ext.pred@xmin, ext.pred@xmax),
 #      ylim = c(ext.pred@ymin, ext.pred@ymax))
-raster::plot(present_bioclim, col = terrain.colors(25, alpha = 0.3, rev = TRUE))
+raster::plot(present_bioclim, col = terrain.colors(25, alpha = 1, rev = TRUE))
 title(bquote('MaxEnt BioClim model ' * italic(.(params$Species))))
 # shapefile of countries
 plot(all_countries, add = TRUE, col = "transparent", border = "black")
 # add occurrences with correct projection
-plot(spdf, add = TRUE, pch = 16, cex = 0.5, col = rgb(red = 0, green = 0, blue = 1, alpha = 0.4))
+plot(spdf, add = TRUE, pch = 16, cex = 0.5, col = rgb(red = 0, green = 0, blue = 1, alpha = 0.3))
 ```
 
 ### SDM using land use data only
 
 
-```{r, plotting the present 3/3, include=TRUE, echo=FALSE}
+```{r plotting the present 3/3, include=TRUE, echo=FALSE, dev='png'}
 # plot(hill, col=grey(0:100/100), legend=FALSE, mar=c(2,2,1,4),
 #      xlim = c(ext.pred@xmin, ext.pred@xmax),
 #      ylim = c(ext.pred@ymin, ext.pred@ymax))
-raster::plot(present_landuse, col = terrain.colors(25, alpha = 0.3, rev = TRUE))
+raster::plot(present_landuse, col = terrain.colors(25, alpha = 1, rev = TRUE))
 title(bquote('MaxEnt landuse model ' * italic(.(params$Species))))
 # shapefile of countries
 plot(all_countries, add = TRUE, col = "transparent", border = "black")
 # add occurrences with correct projection
-plot(spdf, add = TRUE, pch = 16, cex = 0.5, col = rgb(red = 0, green = 0, blue = 1, alpha = 0.4))
+plot(spdf, add = TRUE, pch = 16, cex = 0.5, col = rgb(red = 0, green = 0, blue = 1, alpha = 0.3))
 
 ```
 
@@ -548,55 +717,55 @@ plot(spdf, add = TRUE, pch = 16, cex = 0.5, col = rgb(red = 0, green = 0, blue =
 ### SDM using future BioClim data and contemporary land use data combined
 
 
-```{r, plotting the future 2/2, include=TRUE, echo=FALSE}
+```{r plotting the future 1/2, include=TRUE, echo=FALSE, dev='png'}
 # plot(hill, col=grey(0:100/100), legend=FALSE, mar=c(2,2,1,4),
 #      xlim = c(ext.pred@xmin, ext.pred@xmax),
 #      ylim = c(ext.pred@ymin, ext.pred@ymax))
-raster::plot(fut_full_pred, col = terrain.colors(25, alpha = 0.3, rev = TRUE))
+raster::plot(fut_full_pred, col = terrain.colors(25, alpha = 1, rev = TRUE))
 title(bquote('MaxEnt full model ' * italic(.(params$Species)) * ' : 2041-2060'))
 plot(all_countries, add = TRUE, col = "transparent", border = "black")
-plot(spdf, add = TRUE, pch = 16, cex = 0.5, col = rgb(red = 0, green = 0, blue = 1, alpha = 0.4))
+plot(spdf, add = TRUE, pch = 16, cex = 0.5, col = rgb(red = 0, green = 0, blue = 1, alpha = 0.3))
 
 # plot(hill, col=grey(0:100/100), legend=FALSE, mar=c(2,2,1,4),
 #     xlim = c(ext.pred@xmin, ext.pred@xmax),
 #      ylim = c(ext.pred@ymin, ext.pred@ymax))
-raster::plot(fut2_full_pred, col = terrain.colors(25, alpha = 0.3, rev = TRUE))
+raster::plot(fut2_full_pred, col = terrain.colors(25, alpha = 1, rev = TRUE))
 title(bquote('MaxEnt full model ' * italic(.(params$Species)) * ' : 2061-2080'))
 plot(all_countries, add = TRUE, col = "transparent", border = "black")
-plot(spdf, add = TRUE, pch = 16, cex = 0.5, col = rgb(red = 0, green = 0, blue = 1, alpha = 0.4))
+plot(spdf, add = TRUE, pch = 16, cex = 0.5, col = rgb(red = 0, green = 0, blue = 1, alpha = 0.3))
 ```
 
 
 ### SDM using future BioClim data
 
 
-```{r, plotting the future 1/2, include=TRUE, echo=FALSE}
+```{r plotting the future 2/2, include=TRUE, echo=FALSE, dev='png'}
 # plot(hill, col=grey(0:100/100), legend=FALSE, mar=c(2,2,1,4),
 #      xlim = c(ext.pred@xmin, ext.pred@xmax),
 #      ylim = c(ext.pred@ymin, ext.pred@ymax))
-raster::plot(fut_bioclim_pred, col = terrain.colors(25, alpha = 0.3, rev = TRUE))
+raster::plot(fut_bioclim_pred, col = terrain.colors(25, alpha = 1, rev = TRUE))
 title(bquote('MaxEnt BioClim model ' * italic(.(params$Species)) * ' : 2041-2060'))
 plot(all_countries, add = TRUE, col = "transparent", border = "black")
-plot(spdf, add = TRUE, pch = 16, cex = 0.5, col = rgb(red = 0, green = 0, blue = 1, alpha = 0.4))
+plot(spdf, add = TRUE, pch = 16, cex = 0.5, col = rgb(red = 0, green = 0, blue = 1, alpha = 0.3))
 
 # plot(hill, col=grey(0:100/100), legend=FALSE, mar=c(2,2,1,4),
 #     xlim = c(ext.pred@xmin, ext.pred@xmax),
 #      ylim = c(ext.pred@ymin, ext.pred@ymax))
-raster::plot(fut2_bioclim_pred, col = terrain.colors(25, alpha = 0.5, rev = TRUE))
+raster::plot(fut2_bioclim_pred, col = terrain.colors(25, alpha = 1, rev = TRUE))
 title(bquote('MaxEnt BioClim model ' * italic(.(params$Species)) * ' : 2061-2080'))
 plot(all_countries, add = TRUE, col = "transparent", border = "black")
-plot(spdf, add = TRUE, pch = 16, cex = 0.5, col = rgb(red = 0, green = 0, blue = 1, alpha = 0.4))
+plot(spdf, add = TRUE, pch = 16, cex = 0.5, col = rgb(red = 0, green = 0, blue = 1, alpha = 0.3))
 ```
 
 ## SDM change
 
 ### Change in climatic niche
 
-Change in climatic niche using BioClim predictors between the current climate and future climate. Range expansion is indicated in blue, reduction is indicated in red. Below each geographical plot, a barplot shows the percentage of species records within the estimated contracting (red) or expanding (blue) range under future climatic conditions.
+Change in climatic niche using BioClim predictors between the current climate and future climate. Climatic niche expansion is indicated in blue, reduction is indicated in red. Below each geographical plot, a barplot shows the percentage of species records within the estimated contracting (red) or expanding (blue) range under future climatic conditions.
 
 
 
-```{r, plotting the change (1/2), include=TRUE, echo=FALSE}
+```{r plotting the change, include=TRUE, echo=FALSE, dev='png'}
 # CHANGE
 # calculate change: negative = loss, positive = gain
 change <- fut_bioclim_pred-present_bioclim
@@ -642,19 +811,19 @@ ggplot(data = change_df, aes(x = "", y = Proportion, fill = Change)) +
   theme_void()
 ```
 
-### Limiting variables
+## Limiting variables
 
-The variable most responsible for unfavorable conditions in respect of the species' climatic niche in the future (2041-2060) is plotted for every grid cell. 
+The variable most responsible for unfavorable conditions in respect of the species' climatic niche in the future (2041-2060) is plotted for every grid cell within the estimated species' range. 
 <br>
 <br>
 
-```{r, plotting the limiting factors, include=TRUE, echo=FALSE}
+```{r plotting the limiting factors, include=TRUE, echo=FALSE, dev='png'}
 lim <- rmaxent::limiting(raster::crop(fut_bioclim_cleaned, ext.pred), model_bioclim)
 rasterVis::levelplot(lim, col.regions = rainbow, main = "Limiting variables under future climatic conditions (2041-2060)") 
 
 # Limiting predictors
 lim2 <- rmaxent::limiting(raster::crop(fut2_bioclim_cleaned, ext.pred), model_bioclim)
-rasterVis::levelplot(lim2, col.regions = rainbow, main = "Limiting variables under future climatic conditions (2041-2060)")
+rasterVis::levelplot(lim2, col.regions = rainbow, main = "Limiting variables under future climatic conditions (2061-2080)")
 
 ```
 
@@ -664,7 +833,7 @@ This table shows the relative contribution of every BioClim predictor to the spe
    contribution of every predictor variable.
 <br>
 
-```{r, plotting a table for limiting factors, include=TRUE, echo=FALSE}
+```{r plotting a table for limiting factors, include=TRUE, echo=FALSE}
 # Estimate which limiting variables contribute to the species' climatic niche contraction
 Limiting_Predictors <- function(ChangeRaster, LimitRaster, SpatPoints, NegChange_limit = -0.1) {
   # Identify areas of negative change
@@ -695,7 +864,7 @@ Limiting_Predictors(ChangeRaster = change, LimitRaster = lim, SpatPoints = spdf,
 
 ```
 
-```{r, exporting raster objects if ExportRaster is TRUE, include=TRUE, echo=FALSE}
+```{r exporting raster objects if ExportRaster is TRUE, include=TRUE, echo=FALSE}
 # Create directory
 if (!dir.exists(file.path(params$Workdir, "Raster_objects")) & params$ExportRaster == "YES") {  dir.create(file.path(params$Workdir,"Raster_objects"), recursive = TRUE)}
 
