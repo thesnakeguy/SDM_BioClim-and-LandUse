@@ -21,20 +21,23 @@ base_params <- list(
   Workdir = workdir,
   Country = "",
   Continent = "europe",
-  Database = "all",
-  Limit = 5000,
+  Database = "gbif",
+  Limit = 2500,
   ExportRaster = "YES",
-  Climate.model = "EC-Earth3-Veg",
+  Range = "YES",
+  Climate.model = "MPI-ESM1-2-HR",
+  Ncores = 10,
   SSP = "245",
-  Plot.xmin = -11,
-  Plot.xmax = 36,
-  Plot.ymin = 33,
-  Plot.ymax = 65
+  Plot.xmin = "-11",
+  Plot.xmax = "33",
+  Plot.ymin = "34",
+  Plot.ymax = "65"
 )
 
 # Loop through each species and render an HTML report
 for (species in sp_list) {
   print(paste("Processing species:", species))
+  
   # Update species-specific parameter
   params <- base_params
   params$Species <- species  # Set the species for this iteration
@@ -42,11 +45,21 @@ for (species in sp_list) {
   # Define the output file path
   output_file <- file.path(output_dir, paste0(gsub(" ", "_", species), ".html"))
   
-  # Render the R Markdown document for each species
-  rmarkdown::render("D:/KMMA_documents/Rscripts/Markdown/SDM_Maxent/Maxent_SDM.Rmd",
-                    params = params,
-                    output_file = output_file,
-                    envir = new.env())
+  # Check if output file already exists; skip if it does
+  if (file.exists(output_file)) {
+    cat("Output already exists for species:", species, "- skipping to next species.\n")
+    next  # Skip to the next iteration
+  }
   
-  cat("Report generated for species:", species, "\n")
+  # Use tryCatch to handle errors and continue the loop
+  tryCatch({
+    rmarkdown::render("D:/KMMA_documents/Rscripts/Markdown/SDM_Maxent/Maxent_SDM.Rmd",
+                      params = params,
+                      output_file = output_file,
+                      envir = new.env())
+    cat("Report generated for species:", species, "\n")
+  }, error = function(e) {
+    cat("Error encountered for species:", species, "- skipping to next species.\n")
+  })
 }
+
