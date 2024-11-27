@@ -2,7 +2,7 @@
 library(rmarkdown)
 
 #### Define the working directory for outputs #####################
-workdir <- "C:/Documents and Settings/pdeschepper/Desktop/Maxent"
+workdir <- "D:/temp/SDM_Herpetofauna/Maxent_HighRes_SSP245SSP585/"
 output_dir <- file.path(workdir, "html")
 species_list <- file.path("D:/temp/SDM_Herpetofauna/Snakes/SpeciesList.txt")
 ###################################################################
@@ -22,7 +22,7 @@ base_params <- list(
   Country = "",
   Continent = "europe",
   Database = "gbif",
-  Limit = 2500,
+  Limit = 1500,
   ExportRaster = "YES",
   Range = "YES",
   Climate.model = "MPI-ESM1-2-HR",
@@ -53,7 +53,7 @@ for (species in sp_list) {
   
   # Use tryCatch to handle errors and continue the loop
   tryCatch({
-    rmarkdown::render("D:/KMMA_documents/Rscripts/Markdown/SDM_Maxent/Maxent_SDM.Rmd",
+    rmarkdown::render("D:/KMMA_documents/Rscripts/Markdown/SDM_Maxent/Maxent_SDM_HighRes.Rmd",
                       params = params,
                       output_file = output_file,
                       envir = new.env())
