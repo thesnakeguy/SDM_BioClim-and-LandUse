@@ -53,7 +53,7 @@ params:
     choices: [ACCESS-CM2, ACCESS-ESM1-5, AWI-CM-1-1-MR, BCC-CSM2-MR, CanESM5, CanESM5-CanOE, CMCC-ESM2, CNRM-CM6-1,CNRM-CM6-1-HR,CNRM-ESM2-1,EC-Earth3-Veg, EC-Earth3-Veg-LR, FIO-ESM-2-0, GFDL-ESM4, GISS-E2-1-G, GISS-E2-1-H, HadGEM3-GC31-LL, INM-CM4-8,INM-CM5-0,IPSL-CM6A-LR,MIROC-ES2L, MIROC6, MPI-ESM1-2-HR, MPI-ESM1-2-LR, MRI-ESM2-0, UKESM1-0-LL]
   SSP:
     label: "Select the SSP code:"
-    value: 245
+    value: 585
     input: select
     choices: [245, 585]
   Plot.xmin:
@@ -121,6 +121,7 @@ library(dplyr)
 library(kableExtra)
 library(rangeBuilder)
 library(ENMeval)
+library(cowplot)
 ```
 
 ```{r Get species records, include=FALSE, echo=FALSE}
@@ -221,7 +222,7 @@ if (params$Range == "YES") {
   gg <- ggplot() + geom_point(data = points, aes(x=decimalLongitude, y = decimalLatitude), col="blue", size = 0.4) +
     geom_sf(data = all_countries, fill = "transparent", color="black") +
     coord_sf(xlim = c(bbox$xmin-2, bbox$xmax+2), ylim = c(bbox$ymin-2, bbox$ymax+2), expand = TRUE) + 
-    geom_tile(data = range_df, aes(x = x, y = y), fill = "limegreen", alpha = 0.5) + theme_bw() 
+    geom_raster(data = range_df, aes(x = x, y = y), fill = "limegreen", alpha = 0.5) + theme_bw() 
 } 
 plot(gg)
 
@@ -776,13 +777,12 @@ plot(spdf, add = TRUE, pch = 16, cex = 0.3, col = rgb(red = 0, green = 0, blue =
 
 ### Change in climatic niche
 
-Change in climatic niche using BioClim predictors between the current climate and future climate. Climatic niche expansion is indicated in blue, reduction is indicated in red. Below each geographical plot, a barplot shows the percentage of species records within the estimated contracting (red) or expanding (blue) range under future climatic conditions.
-
+Change in climatic niche availability using BioClim predictors between the current climate and future climate. Increase in climatic niche size is indicated in blue, reduction is indicated in red. 
+Additionally, a trend plot is shown that indicates the change in climatic suitability. For every grid cell of 5x5km that has at least one species record, the average value of change is calculated. Density plots give context to the variability across sites. Averaging values across grid cells mitigates biased results towards extensively visited regions.
 
 
 ```{r plotting the change, include=TRUE, echo=FALSE, dev='jpeg'}
-# CHANGE
-# calculate change: negative = loss, positive = gain
+# Calculate change: negative = loss, positive = gain
 change <- fut_bioclim_pred-present_bioclim
 change2 <- fut2_bioclim_pred-present_bioclim
 colrange <- colorRampPalette(c("darkred", "white", "darkblue"))
@@ -791,39 +791,120 @@ colrange <- colorRampPalette(c("darkred", "white", "darkblue"))
 terra::plot(change, col = colrange(255), range = c(-1, 1))
 title(bquote('Response to climate change ' * italic(.(params$Species)) * ' : 2041-2060'))
 plot(all_countries, add = TRUE, col = "transparent", border = "black")
-# plot barplot
-neg_change <- terra::mask(change, change < 0, maskvalues = FALSE)
-pos_change <- terra::mask(change, change > 0, maskvalues = FALSE)
-neg_change.points <- terra::extract(neg_change, terra::vect(spdf), method = "bilinear") %>% na.omit() %>% nrow()
-pos_change.points <-  terra::extract(pos_change, terra::vect(spdf), method = "bilinear") %>% na.omit() %>% nrow()
-negpos_change.perc <- c(pos_change.points/sum(neg_change.points + pos_change.points), neg_change.points/sum(neg_change.points + pos_change.points))
-change_df <- data.frame(Change = c("Positive", "Negative"), Proportion = negpos_change.perc)
-ggplot(data = change_df, aes(x = "", y = Proportion, fill = Change)) + 
-  geom_bar(stat = "identity", width = 0.1, color = "white", show.legend = FALSE, position =  position_fill(reverse = TRUE)) + 
-  scale_fill_manual(values = c("Negative" = "tomato", "Positive" = "skyblue")) +
-  geom_text(aes(label = round(Proportion,2)), size = 6, position = position_stack(vjust = 0.5, reverse = TRUE), color = "Black") +
-  coord_flip() +
-  theme_void()
-
-
 # plot change2 raster object
 raster::plot(change2, col = colrange(255), range = c(-1, 1))
 title(bquote('Response to climage change ' * italic(.(params$Species)) * ' : 2061-2080'))
 plot(all_countries, add = TRUE, col = "transparent", border = "black")
-# plot barplot
-neg_change <- terra::mask(change2, change2 < 0, maskvalues = FALSE)
-pos_change <- terra::mask(change2, change2 > 0, maskvalues = FALSE)
-neg_change.points <- terra::extract(neg_change, terra::vect(spdf), method = "bilinear") %>% na.omit() %>% nrow()
-pos_change.points <-  terra::extract(pos_change, terra::vect(spdf), method = "bilinear") %>% na.omit() %>% nrow()
-negpos_change.perc <- c(pos_change.points/sum(neg_change.points + pos_change.points), neg_change.points/sum(neg_change.points + pos_change.points))
-change_df <- data.frame(Change = c("Positive", "Negative"), Proportion = negpos_change.perc)
-ggplot(data = change_df, aes(x = "", y = Proportion, fill = Change)) + 
-  geom_bar(stat = "identity", width = 0.1, color = "white", show.legend = FALSE, position =  position_fill(reverse = TRUE)) + 
-  scale_fill_manual(values = c("Negative" = "tomato", "Positive" = "skyblue")) +
-  geom_text(aes(label = round(Proportion,2)), size = 6, position = position_stack(vjust = 0.5, reverse = TRUE), color = "Black") +
-  coord_flip() +
-  theme_void()
+
+
+# Desired cell size in kilometers
+desired_resolution_km <- 5
+# Calculate aggregation factor
+original_res <- terra::res(change) # Resolution in degrees (x, y)
+original_res_km <- original_res * 111.32 # Convert to kilometers (approximation)
+agg_factor <- desired_resolution_km / original_res_km
+# Aggregate rasters to 5x5 km resolution
+agg_change <- terra::aggregate(change, fact = agg_factor, fun = mean, na.rm = TRUE)
+agg_change2 <- terra::aggregate(change2, fact = agg_factor, fun = mean, na.rm = TRUE)
+# Mask aggregated rasters to cells with occurrences
+occurrences <- terra::vect(spdf) # Spatial points for occurrences
+occ_mask_change <- terra::mask(agg_change, occurrences)
+occ_mask_change2 <- terra::mask(agg_change2, occurrences)
+# Calculate mean change values directly from the masked layers
+mean_change <- terra::global(occ_mask_change, fun = mean, na.rm = TRUE)[[1]]
+mean_change2 <- terra::global(occ_mask_change2, fun = mean, na.rm = TRUE)[[1]]
+# Create data frame for plotting
+trend_data <- data.frame(
+  Time = factor(c("Present", "2041-2060", "2061-2080"), levels = c("Present", "2041-2060", "2061-2080")),
+  MeanChange = c(0, mean_change, mean_change2)
+)
+
+# Trend plot
+trend_plot <- ggplot(data = trend_data, aes(x = Time, y = MeanChange, group = 1)) +
+  geom_line(size = 2, color = "lightgrey") +
+  geom_point(size = 4, color = "tomato") +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "gray50") +
+  geom_text(
+    data = trend_data, # Add labels only to future time points
+    aes(label = round(MeanChange, 2)), # Show rounded values
+    nudge_y = 0.05, # Adjust position vertically
+    size = 4,
+    color = ifelse(trend_data$MeanChange == 0, "white", "black")
+  ) +
+  labs(
+    x = "Time Period",
+    y = "Mean Change in Bioclimatic Suitability",
+    title = bquote(italic(.(params$Species)))
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 16, face = "bold"),
+    axis.text = element_text(size = 12),
+    axis.title = element_text(size = 14)
+  )
+
+# Density plots
+# Future 1
+change_values <- na.omit(values(occ_mask_change))
+data <- data.frame(change_values)
+density_plot_2041 <- ggplot(data, aes(x = lyr1)) +
+  geom_density(
+    data = subset(data, lyr1 < 0), 
+    aes(x = lyr1), 
+    fill = "tomato", alpha = 0.6
+  ) +
+  geom_density(
+    data = subset(data, lyr1 >= 0), 
+    aes(x = lyr1), 
+    fill = "skyblue", alpha = 0.6
+  ) +
+  geom_point(
+    aes(x = lyr1, y = 0), 
+    position = position_jitter(height = 0), 
+    color = "darkblue",
+    alpha = 0.6
+  ) +
+  labs(
+    x = "Change in Suitability",
+    y = "Density",
+    title = "Density of Suitability Changes (2041-2060)"
+  ) +
+  theme_minimal(base_size = 8)
+
+
+# Future 2
+change_values <- na.omit(values(occ_mask_change2))
+data <- data.frame(change_values)
+density_plot_2061 <- ggplot(data, aes(x = lyr1)) +
+  geom_density(
+    data = subset(data, lyr1 < 0), 
+    aes(x = lyr1), 
+    fill = "tomato", alpha = 0.6
+  ) +
+  geom_density(
+    data = subset(data, lyr1 >= 0), 
+    aes(x = lyr1), 
+    fill = "skyblue", alpha = 0.6
+  ) +
+  geom_point(
+    aes(x = lyr1, y = 0), 
+    position = position_jitter(height = 0), 
+    color = "darkblue",
+    alpha = 0.6
+  ) +
+  labs(
+    x = "Change in Suitability",
+    y = "Density",
+    title = "Density of Suitability Changes (2061-2080)"
+  ) +
+  theme_minimal(base_size = 8)
+
+# Display plots
+species_trend <- plot_grid(trend_plot, plot_grid(density_plot_2041, density_plot_2061, ncol = 1, nrow = 2), ncol = 2, rel_widths = c(1, 1))
+plot(species_trend)
+
 ```
+
 
 ## Limiting variables
 
