@@ -9,6 +9,7 @@ This RMarkdown script provides a framework for Species Distribution Modeling (SD
 - **Database selection**: Choose between gbif, inaturalist and observation.org as data sources for species occurrences and set restrictions regarding country/continent.
 - **Future Projections**: Models species distribution under various CMIP6 climate models across SSPs 126, 245, 370, and 585 for 2041-2060 and 2061-2080.
 - **Custom Plotting**: Visualize the predicted SDM or ecological niche within specified coordinate ranges. Plotting range does not need to overlap range of occurrences (relevant for invasives).
+- **Distribution ranges**: Distribution ranges can be estimated using a dynamic alpha-hull approach, restricting predictions to the distribution range. (this feature can be toggled on or off)
 - **multicollinearity**: Highly correlated (r>0.75) predictors within the range of the specified occurrences are automaticcaly removed.
 - **Parameterization**: Every MaxEnt model is finetuned with optimal feature class (fc) and regularization multiplier (rm) parameters.
 
@@ -28,7 +29,7 @@ Clone this repository and run the script in an R environment. To specify paramet
 
 ### Requirements
 The script requires the following packages:
-- `dismo`, `raster`, `rgbif`, `sf`, `rmaxent`, `rJava`, `rasterVis`, `viridis`, `geodata`, `ggplot2`, `stringr`, `rnaturalearth`, `caret`, `dichromat`, `dplyr`, `kableExtra`, `rangeBuilder`, `ENMeval`
+- `dismo`, `raster`, `rgbif`, `sf`, `rmaxent`, `rJava`, `rasterVis`, `viridis`, `geodata`, `ggplot2`, `stringr`, `rnaturalearth`, `caret`, `dichromat`, `dplyr`, `kableExtra`, `rangeBuilder`, `ENMeval`, `cowplot` 
 
 ### CMIP6 BioClim and Land Use Variables
 - **BioClim**: 19 variables including temperature and precipitation measures.
