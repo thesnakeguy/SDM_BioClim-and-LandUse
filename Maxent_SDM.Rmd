@@ -232,7 +232,7 @@ plot(gg)
 
 ############## FIRST TIME USE ONLY ####################
 
-
+# UNDER DEVELOPMENT --> in a future update the process of downloading, resampling and merging predictive raster layers will be automated
 # USE THIS CODE TO DOWNLOAD BIOCLIM AND LAND COVER DATA. CHANGE THE SSP TO THE DESIRED VALUE. SET IT TO 245 and 585 AND RUN THE SCRIPT TO 
 # DOWNLAD THE RESPECTIVE SSP RASTER FILES. ONLY 245 and 585 ARE CURRENTLY SUPPORTED AS PARAMETERS FOR MODELLING USING THE .RMD SCRIPT.
 
