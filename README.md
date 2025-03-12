@@ -40,6 +40,9 @@ For more details on Land Use data, see [geodata documentation](https://github.co
 ### Process multiple species
 You can use the Process_species.R script to loop over multiple species stored in a 1-column format in a .txt document containing the scientific names. Parameter values can be modified in the script and override the defaults in the markdown script.
 
+### Example output
+Modelled SDM output for European snake species can be found at https://zenodo.org/records/14620597.
+
 ## Citation
 Please make a reference to this github page when using this tool in publications.
 
